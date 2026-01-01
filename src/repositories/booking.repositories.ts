@@ -72,7 +72,7 @@ export class BookingRepository {
   async findBookingByMaster(ownerId: number, status?: string) {
     return this.prisma.booking.findMany({
       where: {
-        court: { ownerId: ownerId }, // Lọc theo chủ sân
+        court: { ownerId: ownerId },
         status: status ? (status as BookingStatus) : undefined,
       },
       include: {

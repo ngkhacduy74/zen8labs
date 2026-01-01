@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -9,8 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { UserService } from '../services/user.service';
-import { CreateCourtDto } from 'src/dto/court/create-court.dto';
+import { CourtBusinessHourDto, CreateCourtDto } from 'src/dto/court/create-court.dto';
 import { QueryCourtDto } from 'src/dto/court/query-court.dto';
 import { CourtService } from 'src/services/court.service';
 import { AuthGuard } from 'src/guards/token.guard';
@@ -29,6 +29,42 @@ export class CourtController {
   async create(@Body() data: CreateCourtDto, @User('sub') user_id: number) {
     const result = await this.courtService.createCourt(data, user_id);
     return { message: 'Tạo sân thành công', data: result };
+  }
+
+  @UseGuards(AuthGuard,RolesGuard)
+  @Roles(Role.Admin, Role.Master)
+  @Post(":id/business-hours")
+  async createBusinessHours(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() data: CourtBusinessHourDto,
+    @User('sub') user_id: number
+  ) {
+    const result = await this.courtService.createBusinessHours(id, data, user_id);
+    return { message: 'Tạo giờ hoạt động cho sân thành công', data: result };
+  }
+
+  @UseGuards(AuthGuard,RolesGuard)
+  @Roles(Role.Admin, Role.Master)
+  @Patch(":id/business-hours/:dayOfWeek")
+  async updateBusinessHours(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('dayOfWeek') dayOfWeek: number,
+    @Body() data: CourtBusinessHourDto,
+    @User('sub') user_id: number
+  ) {
+    const result = await this.courtService.updateBusinessHours(id, dayOfWeek, data, user_id);
+    return { message: 'Cập nhật giờ cho sân theo ngày trong tuần thành công', data: result };
+  }
+  @UseGuards(AuthGuard,RolesGuard)
+  @Roles(Role.Admin, Role.Master)
+  @Delete(":id/business-hours/:dayOfWeek")
+  async deleteBusinessHours(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('dayOfWeek') dayOfWeek: number,
+    @User('sub') user_id: number
+  ) {
+    const result = await this.courtService.deleteBusinessHours(id, dayOfWeek, user_id);
+    return { message: 'Xóa giờ cho sân theo ngày trong tuần thành công', data: result };
   }
   @UseGuards(AuthGuard, RolesGuard)
   @Roles(Role.Admin, Role.User, Role.Master)
@@ -88,4 +124,6 @@ export class CourtController {
     const result = await this.courtService.getCourtSchedule(courtId, query);
     return { message: 'Lấy lịch sân thành công', data: result };
   }
+
+  
 }

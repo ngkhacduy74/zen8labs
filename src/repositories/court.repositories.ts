@@ -16,14 +16,23 @@ export class CourtRepository {
     id: number,
     ownerId?: number,
     activeOnly = false,
-  ): Promise<Court | null> {
+  ): Promise<any> {
     return await this.prisma.court.findFirst({
       where: {
         id,
         ...(ownerId !== undefined && { ownerId }),
         ...(activeOnly && { status: true }),
-      },
+      },include:{businessHours:true}
     });
+  }
+  async checkPermission(courtId: number, userId: number): Promise<boolean> {
+
+    const result =  await this.prisma.court.findFirst({where:{id:courtId,ownerId:userId}});
+    if (!result) {
+      return false;
+    }
+
+    return true;
   }
 
   async findAll(query: QueryCourtDto, ownerId?: number, activeOnly = false) {
@@ -97,6 +106,36 @@ export class CourtRepository {
         endTime: { gt: from },
       },
       orderBy: { startTime: 'asc' },
+    });
+  }
+  async createBusinessHours(courtId: number, data: any) {
+    return await this.prisma.courtBusinessHour.create({
+      data: {
+        ...data,
+        courtId,
+      },
+    });
+  }
+  async updateBusinessHours(courtId: number, dayOfWeek: number, data: any) {
+    return await this.prisma.courtBusinessHour.update({
+      where: {
+        courtId_dayOfWeek: {
+          courtId,
+          dayOfWeek,
+        },
+      },
+      data,
+    });
+  }
+  
+  async deleteBusinessHours(courtId: number, dayOfWeek: number) {
+    return await this.prisma.courtBusinessHour.delete({
+      where: {
+        courtId_dayOfWeek: {
+          courtId,
+          dayOfWeek,
+        },
+      },
     });
   }
 }
