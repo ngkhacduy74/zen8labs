@@ -9,6 +9,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { CourtController } from 'src/controllers/court.controller';
 import { CourtService } from 'src/services/court.service';
 import { CourtRepository } from 'src/repositories/court.repositories';
+import { BookingRepository } from 'src/repositories/booking.repositories';
 @Module({
   imports: [
     ThrottlerModule.forRoot([
@@ -24,7 +25,7 @@ import { CourtRepository } from 'src/repositories/court.repositories';
     }),
   ],
   controllers: [CourtController],
-  providers: [CourtService, CourtRepository, PrismaService],
+  providers: [CourtService, CourtRepository, PrismaService,BookingRepository],
   exports: [CourtRepository, CourtService],
 })
 export class CourtModule {}

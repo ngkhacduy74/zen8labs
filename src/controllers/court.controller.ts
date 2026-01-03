@@ -19,6 +19,7 @@ import { Roles } from 'src/decorators/role.decorator';
 import { Role } from '@prisma/client';
 import { User } from 'src/decorators/user.decorator';
 import { CourtScheduleQueryDto } from 'src/dto/court/court-schedule-query.dto';
+import { QueryCourtStatsDto } from 'src/dto/court/stats-query.dto';
 
 @Controller('courts')
 export class CourtController {
@@ -48,7 +49,7 @@ export class CourtController {
   @Patch(":id/business-hours/:dayOfWeek")
   async updateBusinessHours(
     @Param('id', ParseIntPipe) id: number,
-    @Param('dayOfWeek') dayOfWeek: number,
+    @Param('dayOfWeek',ParseIntPipe) dayOfWeek: number,
     @Body() data: CourtBusinessHourDto,
     @User('sub') user_id: number
   ) {
@@ -60,7 +61,7 @@ export class CourtController {
   @Delete(":id/business-hours/:dayOfWeek")
   async deleteBusinessHours(
     @Param('id', ParseIntPipe) id: number,
-    @Param('dayOfWeek') dayOfWeek: number,
+    @Param('dayOfWeek',ParseIntPipe) dayOfWeek: number,
     @User('sub') user_id: number
   ) {
     const result = await this.courtService.deleteBusinessHours(id, dayOfWeek, user_id);
@@ -107,7 +108,17 @@ export class CourtController {
     );
     return { message: 'Cập nhật sân thành công', data: result };
   }
+@UseGuards(AuthGuard,RolesGuard)
+@Roles(Role.Admin, Role.Master)
+@Get(':id/statistics')
+async courtStats(@Param('id', ParseIntPipe) id: number, @Query() query: QueryCourtStatsDto) {
+  const result = await this.courtService.getCourtStats(id, query);
+  return { message: 'Lấy thống kê sân thành công', data: result };
+}
 
+
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(Role.Admin, Role.Master)
   @Patch(':id/delete')
   async remove(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
     const result = await this.courtService.softDelete(id, body);

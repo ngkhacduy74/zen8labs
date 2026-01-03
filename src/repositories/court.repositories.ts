@@ -3,6 +3,8 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/services/prisma.service';
 import { BookingStatus, Court } from '@prisma/client';
 import { QueryCourtDto } from 'src/dto/court/query-court.dto';
+import { QueryCourtStatsDto } from 'src/dto/court/stats-query.dto';
+import { CourtBusinessHour } from 'generated/prisma/browser';
 
 @Injectable()
 export class CourtRepository {
@@ -35,7 +37,7 @@ export class CourtRepository {
     return true;
   }
 
-  async findAll(query: QueryCourtDto, ownerId?: number, activeOnly = false) {
+  async findAll(query: QueryCourtDto, ownerId?: number, activeOnly = false):Promise<any> {
     const { page = 1, limit = 10, location } = query;
     const skip = (page - 1) * limit;
 
@@ -108,7 +110,7 @@ export class CourtRepository {
       orderBy: { startTime: 'asc' },
     });
   }
-  async createBusinessHours(courtId: number, data: any) {
+  async createBusinessHours(courtId: number, data: any):Promise<CourtBusinessHour> {
     return await this.prisma.courtBusinessHour.create({
       data: {
         ...data,
@@ -116,7 +118,7 @@ export class CourtRepository {
       },
     });
   }
-  async updateBusinessHours(courtId: number, dayOfWeek: number, data: any) {
+  async updateBusinessHours(courtId: number, dayOfWeek: number, data: any):Promise<CourtBusinessHour> {
     return await this.prisma.courtBusinessHour.update({
       where: {
         courtId_dayOfWeek: {
@@ -128,7 +130,7 @@ export class CourtRepository {
     });
   }
   
-  async deleteBusinessHours(courtId: number, dayOfWeek: number) {
+  async deleteBusinessHours(courtId: number, dayOfWeek: number): Promise<any> {
     return await this.prisma.courtBusinessHour.delete({
       where: {
         courtId_dayOfWeek: {
@@ -138,4 +140,28 @@ export class CourtRepository {
       },
     });
   }
+  async getCourtStats(courtId: number, query: QueryCourtStatsDto) {
+    return 
+  }
+
+  async occupancyRate(courtId: number):Promise<any> {
+   
+  }
+  async peekTime(courtId: number):Promise<any> {
+    
+  }
+ async totalRevenue(courtId: number): Promise<number> {
+  const rows = await this.prisma.booking.findMany({
+    where: { courtId, status: { not: 'Cancelled' } },
+    select: { totalPrice: true },
+  });
+
+  return rows.reduce((sum, b) => sum + b.totalPrice, 0);
+}
+async findCourtForStats(courtId: number) {
+  return this.prisma.court.findUnique({
+    where: { id: courtId },
+    include: { businessHours: true },
+  });
+}
 }

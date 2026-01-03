@@ -13,212 +13,98 @@ import { Booking, BookingStatus, BookingType, Role } from '@prisma/client';
 import { CreateBookingDto } from 'src/dto/booking/create-booking.dto';
 import { CourtRepository } from 'src/repositories/court.repositories';
 import { CreateFixedBookingDto } from 'src/dto/booking/create-fixed-booking.dto';
-import { getDayOfWeek0_6, getMinutesOfDay } from 'src/commons/convert-dayOfWeek.common';
-import { toMinutes } from 'src/commons/convert-hour.common';
 
 @Injectable()
 export class BookingService {
-  private readonly OFFSET_MS = 7 * 60 * 60 * 1000;
-
   constructor(
     private readonly bookingRepository: BookingRepository,
     private readonly courtRepository: CourtRepository,
   ) {}
-
-  private normalizeTime(input: string | Date): Date {
-    const d = new Date(input);
-    if (isNaN(d.getTime())) throw new BadRequestException('Invalid Date');
-    return new Date(d.getTime() - this.OFFSET_MS);
-  }
-
-  private formatLocalTime(date: Date): string {
-    const local = new Date(date.getTime() + this.OFFSET_MS);
-    return local.toISOString().replace('Z', '').replace('T', ' ').slice(0, 16); 
-  }
-
- async createOnce(dto: CreateBookingDto, userId: number): Promise<any> {
-  try {
-    const start = this.normalizeTime(dto.startTime);
-    const end = this.normalizeTime(dto.endTime);
-
-    if (end <= start) {
-      throw new BadRequestException('Thời gian kết thúc phải sau bắt đầu');
-    }
-
-    const court = await this.courtRepository.findById(dto.courtId);
-
-    if (!court) throw new NotFoundException('Không tìm thấy sân');
-    if (!court.status) {
-      throw new BadRequestException('Sân đang tạm ngưng hoạt động');
-    }
-
-    // ✅ dùng timezone của sân (fallback nếu chưa có)
-    const tz = court.timezone ?? 'Asia/Ho_Chi_Minh';
-
-    // ✅ tính theo timezone của sân
-    const day = await getDayOfWeek0_6(start, tz);
-    const startMin = getMinutesOfDay(start, tz);
-    const endMin = getMinutesOfDay(end, tz);
-
-    // ✅ lấy override theo thứ (nếu có)
-    const bhList = court.businessHours ?? [];
-    let rule: any = null;
-    for (const bh of bhList) {
-      if (bh.dayOfWeek === day) {
-        rule = bh;
-        break;
-      }
-    }
-
-    // ✅ nếu override đóng cửa thì chặn
-    if (rule?.isClosed) {
-      throw new BadRequestException('Ngày này sân đóng cửa');
-    }
-
-    // ✅ fallback: không có override -> dùng default của Court
-    const openTime = rule?.openTime ?? court.defaultOpenTime;
-    const closeTime = rule?.closeTime ?? court.defaultCloseTime;
-
-    if (!openTime || !closeTime) {
-      throw new BadRequestException('Sân chưa cấu hình giờ hoạt động');
-    }
-
-    const openMin = toMinutes(openTime);
-    const closeMin = toMinutes(closeTime);
-
-    if (startMin < openMin || endMin > closeMin) {
-      throw new BadRequestException(
-        `Chỉ được đặt trong giờ hoạt động (${openTime} - ${closeTime})`,
+  async createOnce(dto: CreateBookingDto, userId: number): Promise<Booking> {
+    try {
+      const { start, end } = this.parseTime(dto.startTime, dto.endTime);
+      const court = await this.courtRepository.findById(dto.courtId);
+      if (!court) throw new NotFoundException('Không tìm thấy sân');
+      if (!court.status)
+        throw new BadRequestException('Sân đang tạm ngưng hoạt động');
+      const conflict = await this.courtRepository.getCourtSchedule(
+        dto.courtId,
+        start,
+        end,
       );
+      if (conflict.length > 0)
+        throw new ConflictException('Lịch sân đã có người sử dụng');
+      const totalPrice = this.calcTotal(court.price_per_hour, start, end);
+      return await this.bookingRepository.createOnce({
+        userId,
+        courtId: dto.courtId,
+        startTime: start,
+        endTime: end,
+        totalPrice,
+        notes: dto.notes,
+        type: BookingType.Casual,
+        status: BookingStatus.Pending,
+      });
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new InternalServerErrorException('Failed to create booking');
     }
-
-    // ✅ check trùng lịch
-    const conflict = await this.courtRepository.getCourtSchedule(
-      dto.courtId,
-      start,
-      end,
-    );
-
-    if (conflict.length > 0) {
-      throw new ConflictException(
-        `Trùng lịch: ${this.formatLocalTime(start)} - ${this.formatLocalTime(end)}`,
-      );
-    }
-
-    const totalPrice = this.calcTotal(court.price_per_hour, start, end);
-
-    const newBooking = await this.bookingRepository.createOnce({
-      userId,
-      courtId: dto.courtId,
-      startTime: start,
-      endTime: end,
-      totalPrice,
-      notes: dto.notes,
-      type: dto.type || BookingType.Casual,
-      status: BookingStatus.Pending,
-    });
-
-    return {
-      ...newBooking,
-      message_time: `Đã đặt sân từ ${this.formatLocalTime(start)} đến ${this.formatLocalTime(end)} `,
-    };
-  } catch (error) {
-    if (error instanceof HttpException) throw error;
-    throw new InternalServerErrorException('Failed to create booking');
   }
-}
-
 
   async createFixed(dto: CreateFixedBookingDto, userId: number) {
   try {
     const court = await this.courtRepository.findById(dto.courtId);
     if (!court) throw new NotFoundException('Không tìm thấy sân');
-    if (!court.status) throw new BadRequestException('Sân đang tạm ngưng hoạt động');
+    if (!court.status)
+      throw new BadRequestException('Sân đang tạm ngưng hoạt động');
 
-    const tz = court.timezone ?? 'Asia/Ho_Chi_Minh';
+    const base = new Date(dto.startDate);
+    if (isNaN(base.getTime())) {
+      throw new BadRequestException('startDate không hợp lệ');
+    }
+    base.setHours(0, 0, 0, 0);
 
-    const baseLocal = new Date(dto.startDate);
-    if (isNaN(baseLocal.getTime())) {
-      throw new BadRequestException('startDate invalid');
+    if (!dto.daysOfWeek || dto.daysOfWeek.length === 0) {
+      throw new BadRequestException('daysOfWeek không được rỗng');
     }
 
-    const baseYear = baseLocal.getUTCFullYear();
-    const baseMonth = baseLocal.getUTCMonth();
-    const baseDate = baseLocal.getUTCDate();
+    const uniqueDays = Array.from(new Set(dto.daysOfWeek)).sort((a, b) => a - b);
 
-    const rows: Array<any> = [];
-    const bhList = court.businessHours ?? [];
+    const rows: Array<{
+      userId: number;
+      courtId: number;
+      startTime: Date;
+      endTime: Date;
+      totalPrice: number;
+      notes?: string;
+      type: BookingType;
+      status: BookingStatus;
+    }> = [];
 
-    for (const dayOfWeek of dto.daysOfWeek) {
-      const currentDayIndex = new Date(Date.UTC(baseYear, baseMonth, baseDate)).getUTCDay();
-      const diff = (dayOfWeek - currentDayIndex + 7) % 7;
-      const firstMatchDateVal = baseDate + diff;
+    const firstDateForDow = (dow: number) => {
+      const diff = (dow - base.getDay() + 7) % 7;
+      const first = new Date(base);
+      first.setDate(base.getDate() + diff);
+      return first;
+    };
 
-      for (let i = 0; i < dto.weeks; i++) {
-        const targetDateVal = firstMatchDateVal + i * 7;
+    for (let weekIndex = 0; weekIndex < dto.weeks; weekIndex++) {
+      for (const dow of uniqueDays) {
+        const first = firstDateForDow(dow);
 
-        const startTimestamp = Date.UTC(
-          baseYear,
-          baseMonth,
-          targetDateVal,
-          dto.startHour,
-          0,
-          0,
-        );
+        const day = new Date(first);
+        day.setDate(first.getDate() + weekIndex * 7);
 
-        const endTimestamp = Date.UTC(
-          baseYear,
-          baseMonth,
-          targetDateVal,
-          dto.startHour + dto.durationHours,
-          0,
-          0,
-        );
+        const start = new Date(day);
+        start.setHours(dto.startHour, 0, 0, 0);
 
-        const start = new Date(startTimestamp - this.OFFSET_MS);
-        const end = new Date(endTimestamp - this.OFFSET_MS);
+        const end = new Date(start);
+        end.setHours(start.getHours() + dto.durationHours);
 
-        if (end <= start) throw new BadRequestException('Duration invalid');
-
-        const startDay = await getDayOfWeek0_6(start, tz);
-        const endDay = await getDayOfWeek0_6(end, tz);
-        if (startDay !== endDay) {
-          throw new BadRequestException('Không hỗ trợ đặt lịch cố định qua ngày');
+        if (end <= start) {
+          throw new BadRequestException('durationHours không hợp lệ');
         }
 
-        const day = startDay;
-        const startMin = getMinutesOfDay(start, tz);
-        const endMin = getMinutesOfDay(end, tz);
-
-        let rule: any = null;
-        for (const bh of bhList) {
-          if (bh.dayOfWeek === day) {
-            rule = bh;
-            break;
-          }
-        }
-
-        if (rule?.isClosed) {
-          throw new BadRequestException('Ngày này sân đóng cửa');
-        }
-
-        const openTime = rule?.openTime ?? court.defaultOpenTime;
-        const closeTime = rule?.closeTime ?? court.defaultCloseTime;
-
-        if (!openTime || !closeTime) {
-          throw new BadRequestException('Sân chưa cấu hình giờ hoạt động');
-        }
-
-        const openMin = toMinutes(openTime);
-        const closeMin = toMinutes(closeTime);
-
-        if (startMin < openMin || endMin > closeMin) {
-          throw new BadRequestException(
-            `Lịch cố định phải nằm trong giờ hoạt động (${openTime} - ${closeTime})`,
-          );
-        }
-
-       
         const conflict = await this.courtRepository.getCourtSchedule(
           dto.courtId,
           start,
@@ -227,11 +113,12 @@ export class BookingService {
 
         if (conflict.length > 0) {
           throw new ConflictException(
-            `Trùng lịch cố định: ${this.formatLocalTime(start)}`,
+            `Trùng lịch tuần ${weekIndex + 1} (dow=${dow}) (${start.toISOString()} - ${end.toISOString()})`,
           );
         }
 
-        const hours = (end.getTime() - start.getTime()) / (3600 * 1000);
+        const ms = end.getTime() - start.getTime();
+        const hours = ms / (1000 * 60 * 60);
         const totalPrice = court.price_per_hour * hours;
 
         rows.push({
@@ -247,10 +134,6 @@ export class BookingService {
       }
     }
 
-    if (rows.length === 0) {
-      throw new BadRequestException('Không tạo được lịch nào');
-    }
-
     const bookings = await this.bookingRepository.createManyFixed(rows);
     return { count: bookings.length, bookings };
   } catch (error) {
@@ -259,36 +142,93 @@ export class BookingService {
   }
 }
 
+  async getMyBookings(
+    userId: number,
+    role: Role,
+    status?: string,
+  ): Promise<Booking[]> {
+    try {
+      switch (role) {
+        case Role.Admin:
+          return await this.bookingRepository.findAllBookings(status);
 
-  async getMyBookings(userId: number, role: Role, status?: string) {
-     if (role === Role.Admin) return this.bookingRepository.findAllBookings(status);
-     if (role === Role.Master) return this.bookingRepository.findBookingByMaster(userId, status);
-     return this.bookingRepository.findBookingByUser(userId, status);
+        case Role.Master:
+          return await this.bookingRepository.findBookingByMaster(
+            userId,
+            status,
+          );
+
+        case Role.User:
+          return await this.bookingRepository.findBookingByUser(userId, status);
+
+        default:
+          return [];
+      }
+    } catch (error) {
+      console.error('Error in getMyBookings:', error);
+      throw new InternalServerErrorException(
+        'Lỗi hệ thống khi lấy danh sách lịch đặt',
+      );
+    }
   }
-
   async getDetail(bookingId: number, userId: number, role: Role) {
     const booking = await this.bookingRepository.findDetail(bookingId);
-    if (!booking) throw new NotFoundException('Booking not found');
-        if (role === Role.User && booking.userId !== userId) throw new ForbiddenException('No permission');
-    if (role === Role.Master && booking.court.ownerId !== userId) throw new ForbiddenException('No permission');
-    
+
+    if (!booking) {
+      throw new NotFoundException('Không tìm thấy thông tin lịch đặt này');
+    }
+
+    if (role === Role.User) {
+      if (booking.userId !== userId) {
+        throw new ForbiddenException(
+          'Bạn không có quyền xem chi tiết lịch đặt này',
+        );
+      }
+    } else if (role === Role.Master) {
+      if (booking.court.ownerId !== userId) {
+        throw new ForbiddenException(
+          'Lịch đặt này không thuộc sân bạn quản lý',
+        );
+      }
+    }
+
     return booking;
   }
-
   async cancel(bookingId: number, userId: number, role: Role) {
     const booking = await this.bookingRepository.findById(bookingId);
-    if (!booking) throw new NotFoundException('Booking not found');
-    
-    if (role === Role.User && booking.userId !== userId) throw new ForbiddenException('No permission');
-    if (role === Role.Master && booking.court.ownerId !== userId) throw new ForbiddenException('No permission');
-    
-    if (booking.status === BookingStatus.Cancelled) throw new BadRequestException('Already cancelled');
-    
-    return await this.bookingRepository.updateStatus(bookingId, BookingStatus.Cancelled);
+    if (!booking) throw new NotFoundException('Không tìm thấy lịch đặt để hủy');
+
+    if (role === Role.User && booking.userId !== userId) {
+      throw new ForbiddenException('Bạn không thể hủy lịch của người khác');
+    }
+
+    if (role === Role.Master && booking.court.ownerId !== userId) {
+      throw new ForbiddenException(
+        'Bạn chỉ có thể hủy lịch đặt tại sân của mình',
+      );
+    }
+
+    if (booking.status === BookingStatus.Cancelled) {
+      throw new BadRequestException('Lịch này đã được hủy rồi');
+    }
+    return await this.bookingRepository.updateStatus(
+      bookingId,
+      BookingStatus.Cancelled,
+    );
   }
 
+  private parseTime(startTime: string, endTime: string) {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new BadRequestException('startTime/endTime không hợp lệ');
+    }
+
+    return { start, end };
+  }
   private calcTotal(pricePerHour: number, start: Date, end: Date) {
     const ms = end.getTime() - start.getTime();
-    return pricePerHour * (ms / 3600000);
+    const hours = ms / (1000 * 60 * 60);
+    return pricePerHour * hours;
   }
 }

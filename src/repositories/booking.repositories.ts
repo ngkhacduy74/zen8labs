@@ -69,7 +69,7 @@ export class BookingRepository {
       orderBy: { createdAt: 'desc' },
     });
   }
-  async findBookingByMaster(ownerId: number, status?: string) {
+  async findBookingByMaster(ownerId: number, status?: string):Promise<any> {
     return this.prisma.booking.findMany({
       where: {
         court: { ownerId: ownerId },
@@ -87,7 +87,7 @@ export class BookingRepository {
       orderBy: { createdAt: 'desc' },
     });
   }
-  async findAllBookings(status?: string) {
+  async findAllBookings(status?: string):Promise<Booking[]> {
     return this.prisma.booking.findMany({
       where: { status: status ? (status as BookingStatus) : undefined },
       include: {
@@ -97,7 +97,7 @@ export class BookingRepository {
       orderBy: { createdAt: 'desc' },
     });
   }
-  async findDetail(id: number) {
+  async findDetail(id: number):Promise<any> {
     return await this.prisma.booking.findUnique({
       where: { id },
       include: {
@@ -124,17 +124,30 @@ export class BookingRepository {
       },
     });
   }
-  async findById(id: number) {
+  async findById(id: number):Promise<any> {
     return this.prisma.booking.findUnique({
       where: { id },
       include: { court: true },
     });
   }
 
-  async updateStatus(id: number, status: BookingStatus) {
+  async updateStatus(id: number, status: BookingStatus):Promise<Booking> {
     return this.prisma.booking.update({
       where: { id },
       data: { status },
     });
   }
+  async findBookingsInRange(courtId: number, from: Date, to: Date) {
+  return this.prisma.booking.findMany({
+    where: {
+      courtId,
+      status:BookingStatus.Confirmed,
+      startTime: { lt: to },
+      endTime: { gt: from },
+    },
+    select: { startTime: true, endTime: true, totalPrice: true },
+    orderBy: { startTime: 'asc' },
+  });
+}
+
 }

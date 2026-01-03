@@ -9,48 +9,62 @@ datasource db {
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
-  email     String    @unique
-  password  String
-  createdAt DateTime  @default(now())
-  fullname  String
-  phone     String
-  role      Role      @default(User)
-  bookings  Booking[]
-  courts    Court[]
-   notifications Notification[]
+  id                      Int                      @id @default(autoincrement())
+  email                   String                   @unique
+  password                String
+  createdAt               DateTime                 @default(now())
+  fullname                String
+  phone                   String
+  role                    Role                     @default(User)
+  isVerified              Boolean                  @default(false)
+  bookings                Booking[]
+  courts                  Court[]
+  notifications           Notification[]
+  emailVerificationTokens EmailVerificationToken[]
+}
+
+model EmailVerificationToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
 }
 
 model Court {
-  id             Int       @id @default(autoincrement())
+  id             Int      @id @default(autoincrement())
   name           String
   description    String?
   price_per_hour Float
   location       String?
-  status         Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  status         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   ownerId        Int
 
-  timezone         String  @default("Asia/Ho_Chi_Minh")
-  defaultOpenTime  String  @default("05:00") 
-  defaultCloseTime String  @default("23:59")
+  timezone         String @default("Asia/Ho_Chi_Minh")
+  defaultOpenTime  String @default("05:00")
+  defaultCloseTime String @default("23:59")
 
-  bookings       Booking[]
-  businessHours  CourtBusinessHour[] 
-  owner          User      @relation(fields: [ownerId], references: [id])
+  bookings      Booking[]
+  businessHours CourtBusinessHour[]
+  owner         User                @relation(fields: [ownerId], references: [id])
 }
 
 model CourtBusinessHour {
   id        Int     @id @default(autoincrement())
   courtId   Int
-  dayOfWeek Int    
+  dayOfWeek Int
   isClosed  Boolean @default(false)
 
   openTime  String?
-  closeTime String? 
+  closeTime String?
 
-  court     Court   @relation(fields: [courtId], references: [id])
+  court Court @relation(fields: [courtId], references: [id])
 
   @@unique([courtId, dayOfWeek])
   @@index([courtId])
@@ -88,26 +102,28 @@ enum BookingType {
   Monthly
   Event
 }
+
 enum NotificationType {
   BookingCreated
   BookingCancelled
   BookingConfirmed
 }
+
 model Notification {
   id          Int              @id @default(autoincrement())
-  recipientId Int             
+  recipientId Int
   type        NotificationType
   title       String
   message     String
 
-  bookingId   Int?
-  courtId     Int?
+  bookingId Int?
+  courtId   Int?
 
-  isRead      Boolean          @default(false)
-  createdAt   DateTime         @default(now())
-  readAt      DateTime?
+  isRead    Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
 
-  recipient   User             @relation(fields: [recipientId], references: [id])
+  recipient User @relation(fields: [recipientId], references: [id])
 
   @@index([recipientId, isRead, createdAt])
   @@index([bookingId])

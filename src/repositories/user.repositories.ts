@@ -19,4 +19,11 @@ export class UserRepository {
       data,
     });
   }
+  async updateVerified(userId: number) {
+  return this.prisma.user.update({
+    where: { id: userId },
+    data: { isVerified: true }, 
+  });
+}
+
 }
